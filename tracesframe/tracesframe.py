@@ -8,6 +8,14 @@ import holoviews as hv
 hv.extension('bokeh')
 from bokeh.models.formatters import DatetimeTickFormatter
 
+# Some Jaeger backends have API has a limit
+# We can't ask for more than 1500 traces at a time with Badger backend
+JAEGER_MAX_TRACES_RETURNABLE=1500
+
+# By default Jaeger cleans up after 7 days.  TODO Let people change this.``
+MAX_LOOKBACK_IN_DAYS = 14
+MAX_LOOKBACK_IN_SECONDS = MAX_LOOKBACK_IN_DAYS * 24 * 60 * 60
+
 # TODO Support passwords or token/certs if Jaeger is deployed secured
 def known_services(http_endpoint):
     # TODO Switch to logging
@@ -29,39 +37,78 @@ def known_services(http_endpoint):
     # if "jaeger-query" in services: services.remove("jaeger-query")
     return services
 
+# Uses INTERNAL (unofficial API) https://www.jaegertracing.io/docs/1.25/apis/#http-json-internal
 def get_traces(jaeger_http_endpoint, jaeger_password, service, operation, 
         tagexpr, start, end, mindur, maxdur, limit):
-    print("in get_traces")
+    print(f"in get_traces, start={start} end={end}")
     if jaeger_password is not None:
         raise "Jaeger password UNIMPLEMENTED"
     if operation is not None:
         raise "operation param UNIMPLEMENTED"
     if tagexpr is not None:
         raise "tagexpr param UNIMPLEMENTED"
-    if start is not None:
-        raise "start param UNIMPLEMENTED"
-    if end is not None:
-        raise "start param UNIMPLEMENTED"
+    if start is not None and type(start) != int:
+        raise Exception("start param, if supplied, must be int")
+    if end is not None and type(end) != int:
+        raise Exception("end param, if supplied, must be int")
     if mindur is not None:
         raise "mindur param UNIMPLEMENTED"
     if maxdur is not None:
         raise "mindur param UNIMPLEMENTED"
     if limit is None:
         raise "requests without limit UNIMPLEMENTED"
-    if limit > 1500:
-        raise "limit>1500 UNIMPLEMENTED"
+    # if limit > 1500:
+    #     raise "limit>1500 UNIMPLEMENTED"
 
     if service is None:
         raise Exception("unspecified service name UNIMPLEMENTED")
 
+    params = {'service':service, 'limit': limit}
+    if start is not None:
+       params['start'] = str(start)
+    if end is not None:
+       params['end'] = str(end)
     resp = requests.get(f"{jaeger_http_endpoint}/api/traces",
-        params={'service':service, 'limit': limit}, timeout=30)
+        params=params, timeout=30)
     if resp.status_code != 200:
         raise f"/api/traces resp.status_code={resp.status_code}"
 
-    # print(resp.json())
     traces=resp.json()["data"]
-    return traces
+    return traces # TODO Detect if Jaeger has clipped results
+    # if len(traces) < JAEGER_MAX_TRACES_RETURNABLE:
+    #     return traces
+
+    # We got the clipped / max number of traces.  That means traces were lost.
+    # (Or that there were exactly JAEGER_MAX_TRACES_RETURNABLE matches)
+    # Throw away results (which miss traces)  Ask in batches for smaller time windows
+    # NOTE: A better strategy might be to keep the traces, and set `end`
+    #   to the earliest trace-1.
+    # The query might not have start/end times; if not, use [maxlookback .. now]
+    end = end if end else int(time.time()*1000)*1000
+    start = start if start else int(time.time()-MAX_LOOKBACK_IN_SECONDS)*1000*1000
+    print(f"Discarding {len(traces)} traces; preparing to recurse in get_traces, start={start} end={end}")
+    
+    midpoint = int((start + end) / 2)
+    # SINGLY OR DOUBLY RECURSIVE
+    print(f"Doing additional query for second half of time range")
+    second_batch = get_traces(jaeger_http_endpoint, jaeger_password, service, operation, 
+            tagexpr, midpoint+1, end, mindur, maxdur, limit)
+    if len(second_batch) >= limit: # @@@ ecs TODO CHANGE TO ==
+        print(f"Second half query returning {len(second_batch)} traces")
+        return second_batch
+    print(f"Doing additional query for first half of time range")
+    first_batch = get_traces(jaeger_http_endpoint, jaeger_password, service, operation, 
+        tagexpr, start, midpoint, mindur, maxdur, limit)
+    traces = first_batch +  second_batch
+    if len(traces) <= limit:
+        print(f"Second both halves queries returning {len(traces)} traces")
+        return first_batch + second_batch
+    # TODO Sort by trace startTime, return just limit traces
+    print(f"traces[0] is {type(traces[0])}")
+    # print(f"A trace's start time is a {type(traces[0]['startTime'])}")
+    print(f"Throwing away {len(traces)-1500} traces")
+    return traces[-1500::]
+
 
 # Given a Python object (or pandas row), return the root span as a dict
 def rootspan(row):
