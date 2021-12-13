@@ -3,6 +3,8 @@ import time
 import datetime
 from collections import defaultdict
 
+import elasticsearch
+
 import pandas as pd
 import holoviews as hv
 hv.extension('bokeh')
@@ -42,21 +44,21 @@ def get_traces(jaeger_http_endpoint, jaeger_password, service, operation,
         tagexpr, start, end, mindur, maxdur, limit):
     print(f"in get_traces, start={start} end={end}")
     if jaeger_password is not None:
-        raise "Jaeger password UNIMPLEMENTED"
+        raise Exception("Jaeger password UNIMPLEMENTED")
     if operation is not None:
-        raise "operation param UNIMPLEMENTED"
+        raise Exception("operation param UNIMPLEMENTED")
     if tagexpr is not None:
-        raise "tagexpr param UNIMPLEMENTED"
+        raise Exception("tagexpr param UNIMPLEMENTED")
     if start is not None and type(start) != int:
         raise Exception("start param, if supplied, must be int")
     if end is not None and type(end) != int:
         raise Exception("end param, if supplied, must be int")
     if mindur is not None:
-        raise "mindur param UNIMPLEMENTED"
+        raise Exception("mindur param UNIMPLEMENTED")
     if maxdur is not None:
-        raise "mindur param UNIMPLEMENTED"
+        raise Exception("mindur param UNIMPLEMENTED")
     if limit is None:
-        raise "requests without limit UNIMPLEMENTED"
+        raise Exception("requests without limit UNIMPLEMENTED")
     # if limit > 1500:
     #     raise "limit>1500 UNIMPLEMENTED"
 
@@ -112,16 +114,29 @@ def get_traces(jaeger_http_endpoint, jaeger_password, service, operation,
 
 # Given a Python object (or pandas row), return the root span as a dict
 def rootspan(row):
+    # print(f"REACHED rootspan for row {row}")
     for span in row.spans:
        if len(span["references"]) == 0:
             return span
-    return None
+
+    # We did not find the root span.  That means this trace
+    # is missing the root span.
+    # return None
+    # TODO Log Warn?  Info?
+    if len(row.spans) == 0:
+        return None
+    # TODO Instead of picking at random, pick the span with the earliest startTime
+    # min_time = min(row.spans, key=lambda span: span["startTime"])
+    # return next(filter(lambda span: span['startTime'] == min_time, row.spans), None)
+    return row.spans[0]
+
 
 # Return a name for this trace for a human user
 def traceobj_name(row):
     root = rootspan(row)
     if root is None:
         # Fallback if there are no root spans
+        print(f"Trace {row['traceID']} has no root span")
         return row.traceID
 
     # return f'{row["processes"][root["processID"]]["serviceName"]}: {root["operationName"]}'
@@ -184,7 +199,12 @@ def process_traces(dfRawTraces):
     dfTraces["iserror"] = dfTraces["errspans"] > 0
     return dfTraces.sort_values(by='startTime', ascending=False)
 
+def traces_from_jaeger(jaeger_http_endpoint, jaeger_password=None, service=None, operation=None, 
+        tagexpr=None, start=None, end=None, mindur=None, maxdur=None, limit=None):
+    return from_jaeger(jaeger_http_endpoint, jaeger_password, service, operation, 
+        tagexpr, start, end, mindur, maxdur, limit)
 
+# TODO Deprecate
 def from_jaeger(jaeger_http_endpoint, jaeger_password=None, service=None, operation=None, 
         tagexpr=None, start=None, end=None, mindur=None, maxdur=None, limit=None):
     print("in from_jaeger")
@@ -194,11 +214,136 @@ def from_jaeger(jaeger_http_endpoint, jaeger_password=None, service=None, operat
     dfRawTraces = pd.DataFrame(traces)
     return process_traces(dfRawTraces)
 
+def taglist_to_tags(taglist):
+    retval = {}
+    for kv in taglist:
+        retval[kv['key']] = kv['value']
+    return retval
 
-def from_es(es_endpoint, es_password, prefix, service, start, end):
-    print("in from_es")
-    raise "UNIMPLEMENTED"
-    return None
+def traces_from_es(es_endpoint, es_password, prefix, service=None, operation=None, 
+        tagexpr=None, start=None, end=None, mindur=None, maxdur=None, limit=None):
+    
+    # TODO Figure out what to do about 'limit'...
+    raw_spans = internal_spans_from_es(es_endpoint, es_password, prefix, service, operation, 
+        tagexpr, start, end, mindur, maxdur, limit)
+    print(f"back from internal_spans_from_es, got {len(raw_spans)} spans")
+
+    raw_spans.sort(key=lambda span: span['traceID'])
+
+    # spans have keys ['traceID', 'spanID', 'flags', 'operationName', 'references', 'startTime', 'startTimeMillis', 'duration', 'tags', 'logs', 'process']
+    PROCESS_NAME_KEY = 'hostname'
+    all_traces = []
+    if len(raw_spans) > 0:
+        trace_spans = []
+        trace_processes = {}
+        traceID = raw_spans[0]["traceID"]
+        for span in raw_spans:
+            if span["traceID"] != traceID:
+                all_traces.append({
+                    'traceID': traceID,
+                    'spans': trace_spans,
+                    # 'nspans': len(trace_spans),
+                    'processes': trace_processes,
+                })
+                trace_spans = []
+                trace_processes = {}
+                traceID = span["traceID"]
+                
+            tags = taglist_to_tags(span['process']['tags'])
+            span['processID'] = tags[PROCESS_NAME_KEY]
+            trace_spans.append(span)
+            trace_processes[tags[PROCESS_NAME_KEY]] = span['process']
+            # print(f"SpanID {span['spanID']} has process {span['process']}")
+        
+        all_traces.append({
+            'traceID': traceID,
+            'spans': trace_spans,
+            # 'nspans': len(trace_spans),
+            'processes': trace_processes,
+        })
+
+    # debugID = '4501fbafa0a79cff'
+    # debugTrace = next(filter(lambda trace: trace['traceID'] == debugID, all_traces), None)
+    # print(debugTrace)
+    # dfRawTraces = pd.DataFrame([debugTrace])
+    
+    dfRawTraces = pd.DataFrame(all_traces)
+    return process_traces(dfRawTraces)
+
+def spans_from_es(es_endpoint, es_password, prefix, service=None, operation=None, 
+        tagexpr=None, start=None, end=None, mindur=None, maxdur=None, limit=None):
+    spans = internal_spans_from_es(es_endpoint, es_password, prefix, service, operation, 
+        tagexpr, start, end, mindur, maxdur, limit)
+    raise Exception("UNIMPLEMENTED")
+
+def internal_spans_from_es(es_endpoint, es_password, prefix, service=None, operation=None, 
+        tagexpr=None, start=None, end=None, mindur=None, maxdur=None, limit=None):
+    print("in internal_spans_from_es")
+
+    if operation is not None:
+        raise Exception("operation param UNIMPLEMENTED")
+    if tagexpr is not None:
+        raise Exception("tagexpr param UNIMPLEMENTED")
+    if start is not None:
+        raise Exception("start param UNIMPLEMENTED")
+    if end is not None:
+        raise Exception("end param UNIMPLEMENTED")
+    if mindur is not None:
+        raise Exception("mindur param UNIMPLEMENTED")
+    if maxdur is not None:
+        raise Exception("maxdur param UNIMPLEMENTED")
+
+    # TODO Pick better default
+    if limit is None:
+        limit = 2000
+
+    # TODO Support verify != False
+    # TODO Support other ES usernames besides 'elastic'
+    # resp=requests.post(f"{es_endpoint}/_search",
+    #               headers={'Content-Type': 'application/json'},
+    #               verify=False,
+    #               auth=requests.auth.HTTPBasicAuth('elastic', es_password), 
+    #               data='{"from" : 0, "size" : 9999, "query": { "wildcard": { "_index": "my-prefix-jaeger-span*" }}}', 
+    #               timeout=45)
+
+    # TODO Support verify_certs != False
+    # TODO Support other ES usernames besides 'elastic'
+    client = elasticsearch.Elasticsearch(es_endpoint,
+        http_auth=('elastic', es_password),
+        verify_certs=False,
+        scheme="https",
+        port=443) # TODO Why 443?
+
+    search_body = {
+        "size": min(10000, limit),
+        "query": {
+            "match_all": {}
+        }
+    }
+    # TODO Don't use -*, use -2021-08-06 or whatever for start/stop
+    data = client.search(
+        index = f"{prefix}jaeger-span-*",
+        body = search_body,
+        scroll = '15s'
+    )
+
+    all_spans = []
+    # position = 0
+    scroll_size = len(data['hits']['hits'])
+    scroll_id = data['_scroll_id']
+    while scroll_size > 0:
+        all_spans = all_spans + list(map(lambda hit: hit["_source"], data["hits"]["hits"]))
+        if len(all_spans) >= limit:
+            break
+
+        data = client.scroll(scroll_id=scroll_id, scroll='15s')
+
+        # Update
+        scroll_id = data['_scroll_id']
+        scroll_size = len(data['hits']['hits'])
+        # position = position + scroll_size
+
+    return all_spans
 
 def pretty_duration(dur):
    return f"{int(dur.microseconds/1000)}ms"
