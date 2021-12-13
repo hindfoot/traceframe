@@ -450,9 +450,9 @@ class CritSeg:
 
     def __repr__(self):
         return "start={} duration={} end={} spanID={}".format(
-            datetime.fromtimestamp(self.startTime/1000000), # .strftime("%H:%M:%S"),
+            datetime.datetime.fromtimestamp(self.startTime/1000000), # .strftime("%H:%M:%S"),
             self.duration,
-            datetime.fromtimestamp((self.startTime+self.duration)/1000000),
+            datetime.datetime.fromtimestamp((self.startTime+self.duration)/1000000),
             self.span['spanID']
         )
 
@@ -528,8 +528,7 @@ def traceWithSpans(dfT, dfS, traceID):
     retval["spans"] = spans.to_dict(orient='records')
     return retval
 
-# traceWithSpans(dfT, dfSpans, 'efd0841560171ae4')
-
+# Show the spans on a timeline, similar to Jaeger, but with the critical path highlighted
 def showSingleTrace(trace):
 
     origspans = trace["spans"]

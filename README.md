@@ -1,12 +1,13 @@
 
 # Tracesframe
 
-Tracesframe is a Python package to work with distributed
+Tracesframe is a proof-of-concept Python package to work with distributed
 traces, particularly [Jaeger](https://www.jaegertracing.io/) distributed traces, and the [pandas](https://pandas.pydata.org/) tool.
 
 It also uses the [HoloViews](https://holoviews.org/) library.
 
-A tutorial showing the use of the library can be seen at https://github.com/hindfoot/jaeger-analytics-intro
+A tutorial Jupyter notebook showing the use of the library can be seen at https://github.com/hindfoot/jaeger-analytics-intro
+
 
 ## Model
 
@@ -54,7 +55,28 @@ Data columns (total 71 columns):
 | parent                       | object |
 | &lt;tag&gt;                  | object |
 
-## Testing
+## Functions
 
-`python -m unittest`
+- Jaeger API to Python or pandas structures
+  - known_services(endpoint, password)
+  - traces_from_jaeger(endpoint, password, limit, service, op, tag_expr, …) 
+  - spans_from_jaeger(endpoint, password, limit, service, op, tag_expr, …)
+- Elasticsearch to the same structures (experimental)
+  - traces_from_es()
+  - …
+- Analysis
+  - get_critical_segments([]spans)
+- Visualization
+  - pretty_trace_table()
+  - showSingleTrace()
+  - …
+
+## Development
+
+### Testing
+
+```bash
+cd test
+python -m unittest
+```
 
