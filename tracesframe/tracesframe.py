@@ -1,6 +1,7 @@
 import requests
 import time
 import datetime
+import json
 from collections import defaultdict
 
 import elasticsearch
@@ -214,6 +215,11 @@ def from_jaeger(jaeger_http_endpoint, jaeger_password=None, service=None, operat
     dfRawTraces = pd.DataFrame(traces)
     return process_traces(dfRawTraces)
 
+def traces_from_jaeger_file(f):
+    traces = json.load(f)
+    dfRawTraces = pd.DataFrame(traces)
+    return process_traces(dfRawTraces)
+
 def taglist_to_tags(taglist):
     retval = {}
     for kv in taglist:
@@ -388,6 +394,7 @@ def spans_from_jaeger(jaeger_http_endpoint, jaeger_password=None, services=[], o
 
     spans_with_service=[]
     for service in services:
+        # TODO refactor to use append_spans()
         for trace in svc_traces[service]:
             for span in trace["spans"]:
                 copy = dict(span)
@@ -402,6 +409,28 @@ def spans_from_jaeger(jaeger_http_endpoint, jaeger_password=None, services=[], o
 
     dfSpans = pd.DataFrame(spans_with_service)
     return dfSpans
+
+def spans_from_jaeger_file(f):
+    traces = json.load(f)
+
+    spans_with_service=[]
+    for trace in traces:
+        append_spans(spans_with_service, trace)
+
+    dfSpans = pd.DataFrame(spans_with_service)
+    return dfSpans
+
+def append_spans(spans, trace):
+    for span in trace["spans"]:
+        copy = dict(span)
+        # copy["service"] = service
+        copy["service"] = trace["processes"][span["processID"]]["serviceName"]
+        copy["parent"] = parent_span(span)
+        del copy["references"]
+        for tag in span["tags"]:
+            copy[tag["key"]] = tag["value"]
+        del copy["tags"]
+        spans.append(copy)
 
 class Span:
     def __init__(self, traceID, spanID, operationName, startTime, duration, parent_span_id):
@@ -465,6 +494,7 @@ def get_critical_segments(spans):
     id_to_span={"": None}
     events=[]
     for span in spans:
+        # span must be a dict
         id_to_span[span["spanID"]] = span
         events.append(SpanEvent(True, span["startTime"], span))
         events.append(SpanEvent(False, span["startTime"]+span["duration"], span))

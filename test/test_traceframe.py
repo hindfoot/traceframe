@@ -106,7 +106,7 @@ class TraceFrameTest(unittest.TestCase):
         spans = dfSpans.to_dict(orient='records')
         crit_segs = tf.get_critical_segments(spans)
         self.assertEqual(len(crit_segs), 5)
-        self.assertEquals(json.dumps(crit_segs, default=vars, indent=2), crit_path_b6b80525a332cb6b.strip())
+        self.assertEqual(json.dumps(crit_segs, default=vars, indent=2), crit_path_b6b80525a332cb6b.strip())
 
 
     def trace_b6b80525a332cb6b(self):
@@ -131,26 +131,28 @@ class TraceFrameTest(unittest.TestCase):
             "service": ["frontend", "cartservice", "recommendationservice", "productcatalogservice"],
             })
 
-    def emptyTraces(self):
-        return pd.DataFrame({"traceID": [],
-                "traceName": [],
-                "nspans": [],
-                "errspans": [],
-                "duration": [],
-                "startTime": [],
-                "processes": [],
-                })
+    def testJaegerResponse(self):
 
-    def emptyScans(self):
-        return pd.DataFrame({"traceID": [],
-                "traceName": [],
-                "nspans": [],
-                "errspans": [],
-                "duration": [],
-                "startTime": [],
-                "service": [],
-                "parent": [],
-                })
+        with open("jaeger.json", "r") as f:
+          dfT = tf.traces_from_jaeger_file(f)
+          self.assertEqual(len(dfT), 100)
+          self.assertEqual(dfT.size, 800)
+
+        with open("jaeger.json", "r") as f:
+          dfS = tf.spans_from_jaeger_file(f)
+          self.assertEqual(len(dfS), 420)
+          self.assertEqual(dfS.size, 29820)
+
+    def testGetAllCriticalSegments(self):
+        with open("jaeger.json", "r") as f:
+          dfS = tf.spans_from_jaeger_file(f)
+
+        traces = dict(tuple(dfS.groupby('traceID')))
+        for traceID, dfTSpans in traces.items():
+          # print(f"{traceID} has {len(dfTSpans)} spans")
+          spans = dfTSpans.to_dict(orient='records')
+          crit_segs = tf.get_critical_segments(spans)
+          self.assertGreater(len(crit_segs), 0)
 
     def exampleProcesses(self):
         processes = {
