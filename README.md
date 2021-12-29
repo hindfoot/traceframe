@@ -1,7 +1,7 @@
 
-# Tracesframe
+# Traceframe
 
-Tracesframe is a proof-of-concept Python package to work with distributed
+Traceframe is a proof-of-concept Python package to work with distributed
 traces, particularly [Jaeger](https://www.jaegertracing.io/) distributed traces, and the [pandas](https://pandas.pydata.org/) tool.
 
 It also uses the [HoloViews](https://holoviews.org/) library.

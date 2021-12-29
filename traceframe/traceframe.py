@@ -620,7 +620,7 @@ def traceWithSpans(dfT, dfS, traceID: str) -> Dict:
 
     retval = rows.to_dict(orient='records')[0]
     # spans = dfS[dfS["traceID"] == traceID]
-    # Drop duplicates because perhaps the span table includes stuff from all queries (TODO: Remove in tracesframe library)
+    # Drop duplicates because perhaps the span table includes stuff from all queries (TODO: Remove in traceframe library)
     spans = dfS[dfS["traceID"] == traceID].drop_duplicates(subset='spanID')
     retval["spans"] = spans.to_dict(orient='records')
     return retval
@@ -639,7 +639,7 @@ def showSingleTrace(trace):
     spans = []
     for span in origspans:
         copy = dict(span)
-        # TODO Consider adding 'label' to tracesframe library
+        # TODO Consider adding 'label' to traceframe library
         copy["label"] = f"{copy['service']}: {copy['operationName']}"
         copy["endTime"] = copy["startTime"] + copy["duration"]
         spans.append(copy)

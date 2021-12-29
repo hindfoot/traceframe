@@ -1,10 +1,8 @@
 
-print("tracesframe __init__.py parsed")
+print("traceframe __init__.py parsed")
 
-# TODO rename from_jaeger to traces_from_jaeger
-from tracesframe.tracesframe import \
+from traceframe.traceframe import \
     known_services, \
-    from_jaeger, \
     traces_from_jaeger, \
     traces_from_jaeger_file, \
     spans_from_jaeger, \

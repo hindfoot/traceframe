@@ -1,7 +1,7 @@
 import setuptools
 
 setuptools.setup(
-    name='tracesframe',
+    name='traceframe',
     version='0.1',
     description='distributed traces to data frames',
     author='snible@us.ibm.com',

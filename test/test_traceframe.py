@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-import tracesframe as tf
+import traceframe as tf
 import datetime
 import json
 
