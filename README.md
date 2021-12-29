@@ -80,3 +80,4 @@ cd test
 python -m unittest
 ```
 
+**Note: This is a work-in-progress**.  This is an MVP to support a Jupyter notebook demo.  If you desire a particular feature please create an Issue in this repo.

@@ -67,19 +67,19 @@ def get_traces(jaeger_http_endpoint: str, jaeger_password: Optional[str], servic
         raise Exception("mindur param UNIMPLEMENTED")
     if maxdur is not None:
         raise Exception("mindur param UNIMPLEMENTED")
-    if limit is None:
-        raise Exception("requests without limit UNIMPLEMENTED")
-    # if limit > 1500:
-    #     raise "limit>1500 UNIMPLEMENTED"
 
     if service is None:
         raise Exception("unspecified service name UNIMPLEMENTED")
 
-    params: Dict[str, Union[int, str]] = {'service': service, 'limit': limit}
+    # If we don't specify a limit on the Jaeger query we'll only get 100 traces.
+    locallimit = limit if limit is not None else 1500
+
+    params: Dict[str, Union[int, str]] = {'service': service, 'limit': locallimit}
     if start is not None:
         params['start'] = str(start)
     if end is not None:
         params['end'] = str(end)
+    # Note that we are talking to the V2 HTTP API.  It would be better to use gRPC or the V3 HTTP API.
     resp = requests.get(f"{jaeger_http_endpoint}/api/traces",
                         params=params, timeout=30)
     if resp.status_code != 200:
@@ -87,15 +87,19 @@ def get_traces(jaeger_http_endpoint: str, jaeger_password: Optional[str], servic
 
     traces = resp.json()["data"]
     if len(traces) < JAEGER_MAX_TRACES_RETURNABLE:
+        print(
+            f"Returning {len(traces)} traces directly from Jaeger; start={start} end={end}")
         return traces
-
-    return traces  # TODO Detect if Jaeger has clipped results, and recursively explore the range
 
     # We got the clipped / max number of traces.  That means traces were lost.
     # (Or that there were exactly JAEGER_MAX_TRACES_RETURNABLE matches)
-    # Throw away results (which miss traces)  Ask in batches for smaller time windows
+
+    # Throw away results.  Ask in batches for smaller time windows
     # NOTE: A better strategy might be to keep the traces, and set `end`
     #   to the earliest trace-1.
+    # NOTE: Hunting for the data in a library that talks to the Jaeger API is inefficient.
+    #   A better approach might be to query the storage layer directly, or let Jaeger do that.
+
     # The query might not have start/end times; if not, use [maxlookback .. now]
     end = end if end else int(time.time()*1000)*1000
     start = start if start else int(
@@ -108,21 +112,24 @@ def get_traces(jaeger_http_endpoint: str, jaeger_password: Optional[str], servic
     print(f"Doing additional query for second half of time range")
     second_batch = get_traces(jaeger_http_endpoint, jaeger_password, service, operation,
                               tagexpr, midpoint+1, end, mindur, maxdur, limit)
-    if len(second_batch) >= limit:  # @@@ ecs TODO CHANGE TO ==
+
+    if limit is not None and len(second_batch) >= limit:
         print(f"Second half query returning {len(second_batch)} traces")
-        return second_batch
+        # TODO Sort by trace startTime, so we throw away the earliest
+        return second_batch[-limit::]
+
     print(f"Doing additional query for first half of time range")
+    remaining_limit = limit - len(second_batch) if limit is not None else None
     first_batch = get_traces(jaeger_http_endpoint, jaeger_password, service, operation,
-                             tagexpr, start, midpoint, mindur, maxdur, limit)
+                             tagexpr, start, midpoint, mindur, maxdur, remaining_limit)
+
     traces = first_batch + second_batch
-    if len(traces) <= limit:
-        print(f"Second both halves queries returning {len(traces)} traces")
-        return first_batch + second_batch
-    # TODO Sort by trace startTime, return just limit traces
-    print(f"traces[0] is {type(traces[0])}")
-    # print(f"A trace's start time is a {type(traces[0]['startTime'])}")
-    print(f"Throwing away {len(traces)-1500} traces")
-    return traces[-1500::]
+    if limit is not None:
+        print(f"Clipping {len(traces)} to {limit}")
+        # TODO Sort by trace startTime, so we throw away the earliest
+        return traces[-limit::]
+
+    return traces
 
 
 # Given a Python object (or pandas row), return the root span as a dict
@@ -315,6 +322,7 @@ def spans_from_es(es_endpoint: str, es_password: str, prefix: str,
     raise Exception("UNIMPLEMENTED")
 
 
+# Note: experimental.  Do not use.
 def internal_spans_from_es(es_endpoint: str, es_password: str, prefix: str,
                            service: Optional[str] = None, operation: Optional[str] = None,
                            tagexpr: Optional[str] = None,
@@ -704,5 +712,4 @@ def showSingleTrace(trace):
         'start_event', label='Span'), 'end', 'end_event']).opts(color='black')
     returnTree = hv.Segments(returnData, kdims=['start', hv.Dimension(
         'start_event', label='Span'), 'end', 'end_event']).opts(color='black')
-    # return callTree * returnTree * seg
     return spanSegs * spanCrits * callTree * returnTree
