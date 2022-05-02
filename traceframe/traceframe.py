@@ -23,14 +23,14 @@ MAX_LOOKBACK_IN_SECONDS = MAX_LOOKBACK_IN_DAYS * 24 * 60 * 60
 # TODO Support passwords or token/certs if Jaeger is deployed secured
 
 
-def known_services(http_endpoint: str) -> List[str]:
+def known_services(http_endpoint: str, headers: Dict[str, str]={}) -> List[str]:
     # TODO Switch to logging
     print(f"Querying Jaeger for known services")
 
     # 45s timeout too slow when all-in-one loaded with 15 minutes of 100_000_spans_per_second.json
     try:
         start_time = time.time()
-        resp = requests.get(f"{http_endpoint}/api/services", timeout=45)
+        resp = requests.get(f"{http_endpoint}/api/services", headers=headers, timeout=45)
         if time.time() - start_time > 1:
             print(
                 f"Jaeger /api/services took {time.time() - start_time} seconds")
@@ -40,6 +40,10 @@ def known_services(http_endpoint: str) -> List[str]:
 
     if resp.status_code != 200:
         print(f"/api/services status_code {resp.status_code}")
+        print(f"/api/services status_code {resp.status_code}")
+        print(resp.text)
+        raise
+
     services = resp.json()["data"]
     print(f"Jaeger reports {len(services)} service(s)")
     # if "jaeger-query" in services: services.remove("jaeger-query")
@@ -51,7 +55,7 @@ def known_services(http_endpoint: str) -> List[str]:
 def get_traces(jaeger_http_endpoint: str, jaeger_password: Optional[str], service: Optional[str],
                operation: Optional[str], tagexpr: Optional[str],
                start: Optional[int], end: Optional[int], mindur: Optional[int], maxdur: Optional[int],
-               limit: Optional[int]):
+               limit: Optional[int], headers: Dict[str, str]={}):
     print(f"in get_traces, start={start} end={end}")
     if jaeger_password is not None:
         raise Exception("Jaeger password UNIMPLEMENTED")
@@ -81,7 +85,7 @@ def get_traces(jaeger_http_endpoint: str, jaeger_password: Optional[str], servic
         params['end'] = str(end)
     # Note that we are talking to the V2 HTTP API.  It would be better to use gRPC or the V3 HTTP API.
     resp = requests.get(f"{jaeger_http_endpoint}/api/traces",
-                        params=params, timeout=30)
+                        params=params, headers=headers, timeout=30)
     if resp.status_code != 200:
         raise RuntimeError(f"/api/traces resp.status_code={resp.status_code}")
 
@@ -111,7 +115,7 @@ def get_traces(jaeger_http_endpoint: str, jaeger_password: Optional[str], servic
     # SINGLY OR DOUBLY RECURSIVE
     print(f"Doing additional query for second half of time range")
     second_batch = get_traces(jaeger_http_endpoint, jaeger_password, service, operation,
-                              tagexpr, midpoint+1, end, mindur, maxdur, limit)
+                              tagexpr, midpoint+1, end, mindur, maxdur, limit, headers)
 
     if limit is not None and len(second_batch) >= limit:
         print(f"Second half query returning {len(second_batch)} traces")
@@ -121,7 +125,7 @@ def get_traces(jaeger_http_endpoint: str, jaeger_password: Optional[str], servic
     print(f"Doing additional query for first half of time range")
     remaining_limit = limit - len(second_batch) if limit is not None else None
     first_batch = get_traces(jaeger_http_endpoint, jaeger_password, service, operation,
-                             tagexpr, start, midpoint, mindur, maxdur, remaining_limit)
+                             tagexpr, start, midpoint, mindur, maxdur, remaining_limit, headers)
 
     traces = first_batch + second_batch
     if limit is not None:
@@ -238,10 +242,11 @@ def traces_from_jaeger(jaeger_http_endpoint: str, jaeger_password: Optional[str]
 
 def from_jaeger(jaeger_http_endpoint: str, jaeger_password: str = None, service: str = None,
                 operation: str = None,
-                tagexpr: str = None, start=None, end=None, mindur: int = None, maxdur: int = None, limit: int = None):
+                tagexpr: str = None, start=None, end=None, mindur: int = None, maxdur: int = None, limit: int = None,
+                headers: Dict[str, str]={}):
     print("in from_jaeger")
     traces = get_traces(jaeger_http_endpoint, jaeger_password, service,
-                        operation, tagexpr, start, end, mindur, maxdur, limit)
+                        operation, tagexpr, start, end, mindur, maxdur, limit, headers)
     print(f"back from get_traces, got {len(traces)} traces")
     dfRawTraces = pd.DataFrame(traces)
     return process_traces(dfRawTraces)
@@ -432,7 +437,8 @@ def spans_from_jaeger(jaeger_http_endpoint: str, jaeger_password: Optional[str] 
                       services: List[str] = [], operation: Optional[str] = None,
                       tagexpr: Optional[str] = None,
                       start: Optional[int] = None, end: Optional[int] = None, mindur: Optional[int] = None, maxdur: Optional[int] = None,
-                      limit: Optional[int] = None):
+                      limit: Optional[int] = None,
+                      headers: Dict[str, str]={}):
     print("in spans_from_jaeger")
     if not services:
         raise Exception("at least one service name required")
@@ -441,7 +447,7 @@ def spans_from_jaeger(jaeger_http_endpoint: str, jaeger_password: Optional[str] 
     svc_traces = dict()
     for service in services:
         traces = get_traces(jaeger_http_endpoint, jaeger_password, service,
-                            operation, tagexpr, start, end, mindur, maxdur, limit)
+                            operation, tagexpr, start, end, mindur, maxdur, limit, headers)
         print(
             f"back from get_traces(..., {service}), got {len(traces)} traces")
         svc_traces[service] = traces

@@ -58,9 +58,9 @@ Data columns (total 71 columns):
 ## Functions
 
 - Jaeger API to Python or pandas structures
-  - known_services(endpoint, password)
-  - traces_from_jaeger(endpoint, password, limit, service, op, tag_expr, …) 
-  - spans_from_jaeger(endpoint, password, limit, service, op, tag_expr, …)
+  - known_services(endpoint, headers)
+  - traces_from_jaeger(endpoint, password, limit, service, op, tag_expr, …, headers)
+  - spans_from_jaeger(endpoint, password, limit, service, op, tag_expr, …, headers)
 - Elasticsearch to the same structures (experimental)
   - traces_from_es()
   - …
@@ -70,6 +70,8 @@ Data columns (total 71 columns):
   - pretty_trace_table()
   - showSingleTrace()
   - …
+
+The `headers` are expected to be a Dictionary, e.g. `{"Authorization": "Bearer " + apiToken}`, if required by your Jaeger.
 
 ## Development
 
